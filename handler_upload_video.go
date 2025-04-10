@@ -79,11 +79,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 			"Unable to create file on server", err)
 		return
 	}
+	defer os.Remove(file.Name())
 	defer file.Close()
-	defer os.Remove("/tmp/tubely-upload.mp4")
 
-	_, err = io.Copy(file, video)
-	if err != nil {
+	if _, err = io.Copy(file, video); err != nil {
 		respondWithError(w, http.StatusInternalServerError,
 			"Unable to save video on server", err)
 		return
@@ -92,26 +91,24 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	file.Seek(0, io.SeekStart)
 
 	filename := getAssetPath(mediaType)
-    _, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &filename,
 		Body:        file,
 		ContentType: &mth,
 	})
-    if err != nil {
-        respondWithError(w, http.StatusInternalServerError,
-            "cannot upload video", err)
-        return
-    }
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError,
+			"cannot upload video", err)
+		return
+	}
 
-    url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", 
-        cfg.s3Bucket, cfg.s3Region, filename)
-
-    videoMetadata.VideoURL = &url
-    err = cfg.db.UpdateVideo(videoMetadata)
-    if err != nil {
-        respondWithError(w, http.StatusInternalServerError,
-            "Unable to update video", err)
-        return
-    }
+    url := cfg.getObjectURL(filename)
+	videoMetadata.VideoURL = &url
+	err = cfg.db.UpdateVideo(videoMetadata)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError,
+			"Unable to update video", err)
+		return
+	}
 }
