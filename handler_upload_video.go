@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -90,7 +91,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	file.Seek(0, io.SeekStart)
 
-	filename := getAssetPath(mediaType)
+	aspectRatio, _ := getVideoAspectRatio(file.Name())
+	filename := filepath.Join(aspectRatio, getAssetPath(mediaType))
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &filename,
@@ -103,7 +105,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-    url := cfg.getObjectURL(filename)
+	url := cfg.getObjectURL(filename)
 	videoMetadata.VideoURL = &url
 	err = cfg.db.UpdateVideo(videoMetadata)
 	if err != nil {
