@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -89,14 +90,34 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	file.Seek(0, io.SeekStart)
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		respondWithError(w, http.StatusInternalServerError,
+			"Unable to reset file pointer", err)
+		return
+	}
 
-	aspectRatio, _ := getVideoAspectRatio(file.Name())
-	filename := filepath.Join(aspectRatio, getAssetPath(mediaType))
+	fastStartVideoPath, err := processVideoForFastStart(file.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError,
+			"Unable to process video for fasr start", err)
+		return
+	}
+	defer os.Remove(fastStartVideoPath)
+
+	fastStartVideo, err := os.Open(fastStartVideoPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError,
+			"Unable to open fast start video", err)
+		return
+	}
+	defer fastStartVideo.Close()
+
+	aspectRatio, _ := getVideoAspectRatio(fastStartVideoPath)
+	key := filepath.Join(aspectRatio, getAssetPath(mediaType))
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
-		Key:         &filename,
-		Body:        file,
+		Key:         &key,
+		Body:        fastStartVideo,
 		ContentType: &mth,
 	})
 	if err != nil {
@@ -105,7 +126,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url := cfg.getObjectURL(filename)
+	url := cfg.s3CfDistribution + "/" + key
+    log.Println(url)
 	videoMetadata.VideoURL = &url
 	err = cfg.db.UpdateVideo(videoMetadata)
 	if err != nil {
@@ -113,4 +135,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 			"Unable to update video", err)
 		return
 	}
+
+    respondWithJSON(w, http.StatusOK, videoMetadata)
 }
